@@ -1,13 +1,13 @@
 import os
 import time
-from typing import Optional
 import uuid
+from typing import Optional
 
 import dap_server
 from dap_server import Source
 from lldbsuite.test.lldbtest import *
-from lldbsuite.test import lldbplatformutil
 import lldbgdbserverutils
+from lldbsuite.test import lldbplatformutil
 
 
 class DAPTestCaseBase(TestBase):
@@ -449,6 +449,7 @@ class DAPTestCaseBase(TestBase):
         self,
         program=None,
         *,
+        singleStoppedEvent=False,
         sourceInitFile=False,
         disconnectAutomatically=True,
         expectFailure=False,
@@ -467,7 +468,7 @@ class DAPTestCaseBase(TestBase):
         self.addTearDownHook(cleanup)
 
         # Initialize and launch the program
-        self.dap_server.request_initialize(sourceInitFile)
+        self.dap_server.request_initialize(sourceInitFile, singleStoppedEvent)
         response = self.dap_server.request_launch(program, **kwargs)
         if expectFailure:
             return response
