@@ -5,14 +5,14 @@ import json
 import optparse
 import os
 import pprint
+import signal
 import socket
 import string
 import subprocess
-import signal
 import sys
 import threading
 import time
-from typing import Any, Optional, Union, BinaryIO, TextIO
+from typing import Any, BinaryIO, Optional, TextIO, Union
 
 ## DAP type references
 Event = dict[str, Any]
@@ -171,6 +171,7 @@ class DebugCommunication(object):
         self.frame_scopes = {}
         self.init_commands = init_commands
         self.resolved_breakpoints = {}
+        self.initialized_event = None
 
     @classmethod
     def encode_content(cls, s: str) -> bytes:
@@ -276,6 +277,7 @@ class DebugCommunication(object):
                 return keepGoing
             elif event == "initialized":
                 self.initialized = True
+                self.initialized_event = packet
             elif event == "process":
                 # When a new process is attached or launched, remember the
                 # details that are available in the body of the event
