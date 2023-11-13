@@ -89,3 +89,5 @@ if(LLDB_DAP_WELCOME_MESSAGE)
 endif()
 
 add_subdirectory(tool)
+
+add_llvm_tool_symlink(lldb-vscode lldb-dap)
