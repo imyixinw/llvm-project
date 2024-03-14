@@ -2791,6 +2791,10 @@ SymbolFileDWARF::FindNamespace(ConstString name,
   if (!DeclContextMatchesThisSymbolFile(parent_decl_ctx))
     return namespace_decl_ctx;
 
+  std::vector<lldb_private::CompilerContext> parent_compiler_contexts =
+      parent_decl_ctx.GetCompilerContext();
+  parent_compiler_contexts.push_back({CompilerContextKind::Namespace, name});
+  TypeQuery query(parent_compiler_contexts);
   m_index->GetNamespacesWithParents(name, parent_decl_ctx, [&](DWARFDIE die) {
     if (!DIEInDeclContext(parent_decl_ctx, die, only_root_namespaces))
       return true; // The containing decl contexts don't match

@@ -371,19 +371,56 @@ void DebugNamesDWARFIndex::GetFullyQualifiedType(
   m_fallback.GetFullyQualifiedType(context, callback);
 }
 
+static CompilerContextKind GetCompilerContextKind(dwarf::Tag tag) {
+  switch (tag) {
+  case DW_TAG_namespace:
+    return CompilerContextKind::Namespace;
+  case DW_TAG_class_type:
+  case DW_TAG_structure_type:
+    return CompilerContextKind::ClassOrStruct;
+  case DW_TAG_union_type:
+    return CompilerContextKind::Union;
+  case DW_TAG_enumeration_type:
+    return CompilerContextKind::Enum;
+  case DW_TAG_typedef:
+    return CompilerContextKind::Typedef;
+  case DW_TAG_subprogram:
+    return CompilerContextKind::Function;
+  case DW_TAG_variable:
+    return CompilerContextKind::Variable;
+  case DW_TAG_module:
+    return CompilerContextKind::Module;
+  default:
+    return CompilerContextKind::Any;
+  }
+}
+
 bool DebugNamesDWARFIndex::SameAsEntryContext(
     const CompilerContext &query_context,
     const DebugNames::Entry &entry) const {
-  // TODO: check dwarf tag matches.
-  // Peek at the AT_name of `entry` and test equality to `name`.
+  CompilerContextKind entry_kind = GetCompilerContextKind(entry.tag());
+  if ((query_context.kind & entry_kind) == CompilerContextKind::Invalid)
+    return false;
+
   auto maybe_dieoffset = entry.getDIEUnitOffset();
   if (!maybe_dieoffset)
     return false;
-  DWARFUnit *unit = GetNonSkeletonUnit(entry);
-  if (!unit)
-    return false;
-  return query_context.name ==
-         unit->PeekDIEName(unit->GetOffset() + *maybe_dieoffset);
+
+  // [Optimization] instead of parsing the entry from dwo file, we simply
+  // check if the query_name can point to an entry of the same DIE offset.
+  // This greatly reduced number of dwo file parsed and thus improved the
+  // performance.
+  for (const DebugNames::Entry &query_entry :
+       entry.getNameIndex()->equal_range(query_context.name)) {
+    auto query_dieoffset = query_entry.getDIEUnitOffset();
+    if (!query_dieoffset)
+      continue;
+
+    if (*query_dieoffset == *maybe_dieoffset) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool DebugNamesDWARFIndex::SameParentChain(
@@ -393,16 +430,27 @@ bool DebugNamesDWARFIndex::SameParentChain(
   if (parent_entries.size() != parent_names.size())
     return false;
 
-  auto SameAsEntryATName = [this](llvm::StringRef name,
-                                  const DebugNames::Entry &entry) {
-    // Peek at the AT_name of `entry` and test equality to `name`.
+  auto SameAsEntryATName = [](llvm::StringRef name,
+                              const DebugNames::Entry &entry) {
     auto maybe_dieoffset = entry.getDIEUnitOffset();
     if (!maybe_dieoffset)
       return false;
-    DWARFUnit *unit = GetNonSkeletonUnit(entry);
-    if (!unit)
-      return false;
-    return name == unit->PeekDIEName(unit->GetOffset() + *maybe_dieoffset);
+
+    // [Optimization] instead of parsing the entry from dwo file, we simply
+    // check if the query_name can point to an entry of the same DIE offset.
+    // This greatly reduced number of dwo file parsed and thus improved the
+    // performance.
+    for (const DebugNames::Entry &query_entry :
+         entry.getNameIndex()->equal_range(name)) {
+      auto query_dieoffset = query_entry.getDIEUnitOffset();
+      if (!query_dieoffset)
+        continue;
+
+      if (*query_dieoffset == *maybe_dieoffset) {
+        return true;
+      }
+    }
+    return false;
   };
 
   // If the AT_name of any parent fails to match the expected name, we don't
