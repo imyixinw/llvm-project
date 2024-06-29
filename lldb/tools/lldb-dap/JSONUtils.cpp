@@ -1248,6 +1248,11 @@ static void FilterAndGetValueForKey(const lldb::SBStructuredData data,
 void addStatisticsSummary(lldb::SBTarget &target, llvm::json::Object &event) {
   lldb::SBStatisticsOptions options;
   options.SetSummaryOnly(true);
+  // META BEGIN
+  // Temporary fix until #97004 is upstreamed.
+  // TODO: Revert/delete this block once #97004 is in toolchain/llvm-sand/main
+  options.SetIncludeTargets(true);
+  // META END
   lldb::SBStructuredData statistics = target.GetStatistics(options);
 
   bool is_dictionary =
