@@ -123,7 +123,7 @@ DAP::DAP(Log *log, const ReplMode default_repl_mode,
     : log(log), transport(transport), broadcaster("lldb-dap"),
       progress_event_reporter(
           [&](const ProgressEvent &event) { SendJSON(event.ToJSON()); }),
-      repl_mode(default_repl_mode) {
+      repl_mode(default_repl_mode), keep_alive_timeout_ms(0) {
   configuration.preInitCommands = std::move(pre_init_commands);
   RegisterRequests();
 }
@@ -918,6 +918,11 @@ llvm::Error DAP::Disconnect(bool terminateDebuggee) {
   SendTerminatedEvent();
 
   disconnecting = true;
+  // If we are disconnecting and keep alive is enabled, we will reset
+  // debugger state for future debug session reuse.
+  if (disconnecting && KeepAlive()) {
+    ResetDebuggerState();
+  }
 
   return ToError(error);
 }
@@ -960,7 +965,9 @@ llvm::Error DAP::Loop() {
           m_queue_cv.notify_all();
         });
 
-        while (!disconnecting) {
+        // Whether we've recevied a disconnect request or not.
+        bool after_disconnect = false; 
+        while (!disconnecting || KeepAlive()) {
           llvm::Expected<Message> next =
               transport.Read<protocol::Message>(std::chrono::seconds(1));
           if (next.errorIsA<TransportEOFError>()) {
@@ -971,6 +978,18 @@ llvm::Error DAP::Loop() {
           // If the read timed out, continue to check if we should disconnect.
           if (next.errorIsA<TransportTimeoutError>()) {
             consumeError(next.takeError());
+            // If there is no further request for certain peroid of time we will
+            // timeout and exit.
+            if (after_disconnect) {
+              auto current_time = std::chrono::steady_clock::now();
+              auto elapsed_ms =
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      current_time - m_last_request_time)
+                      .count();
+              if (elapsed_ms >= keep_alive_timeout_ms) {
+                break;
+              }
+            }
             continue;
           }
 
@@ -980,10 +999,13 @@ llvm::Error DAP::Loop() {
             return errWrapper;
           }
 
+          after_disconnect = false;
           if (const protocol::Request *req =
                   std::get_if<protocol::Request>(&*next);
-              req && req->arguments == "disconnect")
+              req && req->command == "disconnect") {
             disconnecting = true;
+            after_disconnect = true;
+          }
 
           const std::optional<CancelArguments> cancel_args =
               getArgumentsIfRequest<CancelArguments>(*next, "cancel");
@@ -1012,6 +1034,7 @@ llvm::Error DAP::Loop() {
             std::lock_guard<std::mutex> guard(m_queue_mutex);
             m_queue.push_back(std::move(*next));
           }
+          m_last_request_time = std::chrono::steady_clock::now();
           m_queue_cv.notify_one();
         }
 
@@ -1562,6 +1585,29 @@ void DAP::RegisterRequests() {
 
   // Testing requests
   RegisterRequest<TestGetTargetBreakpointsRequestHandler>();
+}
+
+bool DAP::KeepAlive() { return keep_alive_timeout_ms > 0; }
+
+void DAP::ResetDebuggerState() {
+  StopEventHandlers();
+  m_source_breakpoints.clear();
+  function_breakpoints.clear();
+  exception_breakpoints.clear();
+
+  // Destory existing debugger so that we can start from a fresh state.
+  if (debugger.IsValid()) {
+    // Clear any global target settings by previous debug sessions so that
+    // new debug session can start from a freshed state.
+    lldb::SBDebugger::ClearInternalVariable("target",
+                                            debugger.GetInstanceName());
+    debugger.ResetStatistics();
+    lldb::SBDebugger::Destroy(debugger);
+  }
+  // Reset terminated_event_flag so that it can be reused for future sessions.
+  terminated_event_flag.~once_flag();
+  new (&terminated_event_flag) std::once_flag;
+  disconnecting = false;
 }
 
 } // namespace lldb_dap

@@ -560,6 +560,18 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
+  if (auto *arg = input_args.getLastArg(OPT_keep_alive)) {
+    auto optarg = arg->getValue();
+    char *remainder;
+    int keep_alive_timeout_ms = strtol(optarg, &remainder, 0);
+    if (remainder == optarg || *remainder != '\0') {
+      fprintf(stderr, "'%s' is not a valid number for --keep-alive.\n", optarg);
+      return EXIT_FAILURE;
+    }
+    dap.keep_alive_timeout_ms =
+        keep_alive_timeout_ms > 0 ? keep_alive_timeout_ms : 0;
+  }
+
   // used only by TestVSCode_redirection_to_console.py
   if (getenv("LLDB_DAP_TEST_STDOUT_STDERR_REDIRECTION") != nullptr)
     redirection_test();

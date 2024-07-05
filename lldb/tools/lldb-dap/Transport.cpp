@@ -11,6 +11,10 @@
 #include "lldb/lldb-forward.h"
 #include "llvm/ADT/StringRef.h"
 
+#if !defined(_WIN32)
+#include <sys/select.h>
+#endif
+
 using namespace llvm;
 using namespace lldb;
 using namespace lldb_private;

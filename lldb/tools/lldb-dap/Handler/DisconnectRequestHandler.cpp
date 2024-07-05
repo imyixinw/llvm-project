@@ -25,6 +25,10 @@ Error DisconnectRequestHandler::Run(
   if (arguments && arguments->terminateDebuggee)
     terminateDebuggee = *arguments->terminateDebuggee;
 
+  // Client may want to override the default keep alive timeout.
+  if (arguments && arguments->keepAliveTimeout)
+    dap.keep_alive_timeout_ms = *arguments->keepAliveTimeout;
+
   if (Error error = dap.Disconnect(terminateDebuggee))
     return error;
 

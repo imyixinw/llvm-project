@@ -72,6 +72,8 @@ struct DisconnectArguments {
   /// attribute is only honored by a debug adapter if the corresponding
   /// capability `supportSuspendDebuggee` is true.
   std::optional<bool> suspendDebuggee;
+
+  std::optional<uint64_t> keepAliveTimeout;
 };
 bool fromJSON(const llvm::json::Value &, DisconnectArguments &,
               llvm::json::Path);

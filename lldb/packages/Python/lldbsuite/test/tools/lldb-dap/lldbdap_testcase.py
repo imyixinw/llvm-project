@@ -15,10 +15,14 @@ class DAPTestCaseBase(TestBase):
     # timeout by a factor of 10 if ASAN is enabled.
     DEFAULT_TIMEOUT = 10 * (10 if ("ASAN_OPTIONS" in os.environ) else 1)
     NO_DEBUG_INFO_TESTCASE = True
+    # Caches last dap server for reusing.
+    alive_dap_server = None
 
     def create_debug_adapter(
         self,
         lldbDAPEnv: Optional[dict[str, str]] = None,
+        keepAliveTimeout: Optional[int] = None,
+        reuseDapServer: bool = False,
         connection: Optional[str] = None,
     ):
         """Create the Visual Studio Code debug adapter"""
@@ -26,21 +30,35 @@ class DAPTestCaseBase(TestBase):
             is_exe(self.lldbDAPExec), "lldb-dap must exist and be executable"
         )
         log_file_path = self.getBuildArtifact("dap.txt")
+
+        if reuseDapServer:
+            self.assertIsNotNone(
+                DAPTestCaseBase.alive_dap_server, "No alive dap server found."
+            )
+            self.dap_server = DAPTestCaseBase.alive_dap_server
+            self.dap_server.reset(self.setUpCommands(), keepAlive=True)
+            return
+
         self.dap_server = dap_server.DebugAdapterServer(
             executable=self.lldbDAPExec,
             connection=connection,
             init_commands=self.setUpCommands(),
             log_file=log_file_path,
             env=lldbDAPEnv,
+            keepAliveTimeout=keepAliveTimeout,
         )
+        if keepAliveTimeout is not None:
+            # Keep alive for future reuse
+            DAPTestCaseBase.alive_dap_server = self.dap_server
 
     def build_and_create_debug_adapter(
         self,
         lldbDAPEnv: Optional[dict[str, str]] = None,
+        keepAliveTimeout: Optional[int] = None,
         dictionary: Optional[dict] = None,
     ):
         self.build(dictionary=dictionary)
-        self.create_debug_adapter(lldbDAPEnv)
+        self.create_debug_adapter(lldbDAPEnv, keepAliveTimeout)
 
     def build_and_create_debug_adapter_for_attach(self):
         """Variant of build_and_create_debug_adapter that builds a uniquely
@@ -483,12 +501,13 @@ class DAPTestCaseBase(TestBase):
         program,
         *,
         lldbDAPEnv: Optional[dict[str, str]] = None,
+        keepAliveTimeout: Optional[int] = None,
         **kwargs,
     ):
         """Build the default Makefile target, create the DAP debug adapter,
         and launch the process.
         """
-        self.build_and_create_debug_adapter(lldbDAPEnv)
+        self.build_and_create_debug_adapter(lldbDAPEnv, keepAliveTimeout)
         self.assertTrue(os.path.exists(program), "executable must exist")
 
         return self.launch(program, **kwargs)

@@ -150,6 +150,8 @@ struct DAP {
 
   /// The set of features supported by the connected client.
   llvm::DenseSet<ClientFeature> clientFeatures;
+  // Zero to not keep alive.
+  uint64_t keep_alive_timeout_ms;
 
   /// The initial thread list upon attaching.
   std::vector<protocol::Thread> initial_thread_list;
@@ -459,6 +461,12 @@ private:
 
   llvm::StringMap<SourceBreakpointMap> m_source_breakpoints;
   llvm::DenseMap<int64_t, SourceBreakpointMap> m_source_assembly_breakpoints;
+  
+  std::chrono::time_point<std::chrono::steady_clock> m_last_request_time;
+
+  bool KeepAlive();
+
+  void ResetDebuggerState();
 };
 
 } // namespace lldb_dap

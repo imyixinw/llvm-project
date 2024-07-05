@@ -146,26 +146,35 @@ class DebugCommunication(object):
         send: BinaryIO,
         init_commands: list[str],
         log_file: Optional[TextIO] = None,
+        keepAlive=False,
     ):
         # For debugging test failures, try setting `trace_file = sys.stderr`.
         self.trace_file: Optional[TextIO] = None
         self.log_file = log_file
+        self.trace_file = None
         self.send = send
         self.recv = recv
         self.recv_packets: list[Optional[ProtocolMessage]] = []
         self.recv_condition = threading.Condition()
         self.recv_thread = threading.Thread(target=self._read_packet_thread)
+        self.sequence = 1
+        self.recv_thread.start()
+        self.output_condition = threading.Condition()
+        self.reset(init_commands, keepAlive)
+
+    # This will be called to re-initialize DebugCommunication object during
+    # reusing lldb-dap.
+    def reset(self, init_commands, keepAlive=False):
+        self.trace_file = None
+        self.recv_packets = []
         self.process_event_body = None
         self.exit_status: Optional[int] = None
         self.capabilities: dict[str, Any] = {}
         self.progress_events: list[Event] = []
         self.thread_events_body = []
         self.reverse_requests = []
-        self.sequence = 1
         self.threads = None
         self.thread_stop_reasons = {}
-        self.recv_thread.start()
-        self.output_condition = threading.Condition()
         self.output: dict[str, list[str]] = {}
         self.configuration_done_sent = False
         self.initialized = False
@@ -173,6 +182,7 @@ class DebugCommunication(object):
         self.init_commands = init_commands
         self.resolved_breakpoints = {}
         self.initialized_event = None
+        self.keepAlive = keepAlive
 
     @classmethod
     def encode_content(cls, s: str) -> bytes:
@@ -321,7 +331,9 @@ class DebugCommunication(object):
 
         elif packet_type == "response":
             if packet["command"] == "disconnect":
-                keepGoing = False
+                # Disconnect response should exit the packet read loop unless
+                # client wants to keep adapter alive for reusing.
+                keepGoing = self.keepAlive
         self._enqueue_recv_packet(packet)
         return keepGoing
 
@@ -1322,12 +1334,17 @@ class DebugAdapterServer(DebugCommunication):
         init_commands: list[str] = [],
         log_file: Optional[TextIO] = None,
         env: Optional[dict[str, str]] = None,
+        keepAliveTimeout: Optional[int] = None,
     ):
         self.process = None
         self.connection = None
         if executable is not None:
             process, connection = DebugAdapterServer.launch(
-                executable=executable, connection=connection, env=env, log_file=log_file
+                executable=executable,
+                connection=connection,
+                env=env,
+                log_file=log_file,
+                keepAliveTimeout=keepAliveTimeout,
             )
             self.process = process
             self.connection = connection
@@ -1349,8 +1366,21 @@ class DebugAdapterServer(DebugCommunication):
             self.connection = connection
         else:
             DebugCommunication.__init__(
-                self, self.process.stdout, self.process.stdin, init_commands, log_file
+                self,
+                self.process.stdout,
+                self.process.stdin,
+                init_commands,
+                log_file,
+                keepAlive=(keepAliveTimeout is not None),
             )
+
+    @staticmethod
+    def get_args(executable, keepAliveTimeout=None):
+        return (
+            [executable]
+            if keepAliveTimeout is None
+            else [executable, "--keep-alive", str(keepAliveTimeout)]
+        )
 
     @classmethod
     def launch(
@@ -1360,6 +1390,7 @@ class DebugAdapterServer(DebugCommunication):
         env: Optional[dict[str, str]] = None,
         log_file: Optional[TextIO] = None,
         connection: Optional[str] = None,
+        keepAliveTimeout: Optional[int] = None,
     ) -> tuple[subprocess.Popen, Optional[str]]:
         adapter_env = os.environ.copy()
         if env is not None:
@@ -1367,7 +1398,7 @@ class DebugAdapterServer(DebugCommunication):
 
         if log_file:
             adapter_env["LLDBDAP_LOG"] = log_file
-        args = [executable]
+        args = cls.get_args(executable, keepAliveTimeout)
 
         if connection is not None:
             args.append("--connection")
@@ -1748,6 +1779,14 @@ def main():
         ),
     )
 
+    parser.add_option(
+        "--keep-alive",
+        type="int",
+        dest="keepAliveTimeout",
+        help="The number of milliseconds to keep lldb-dap alive after client disconnection for reusing. Zero or negative value will not keep lldb-dap alive.",
+        default=None,
+    )
+
     (options, args) = parser.parse_args(sys.argv[1:])
 
     if options.vscode_path is None and options.connection is None:
@@ -1758,7 +1797,9 @@ def main():
         )
         return
     dbg = DebugAdapterServer(
-        executable=options.vscode_path, connection=options.connection
+        executable=options.vscode_path,
+        connection=options.connection,
+        keepAliveTimeout=options.keepAliveTimeout,
     )
     if options.debug:
         raw_input('Waiting for debugger to attach pid "%i"' % (dbg.get_pid()))

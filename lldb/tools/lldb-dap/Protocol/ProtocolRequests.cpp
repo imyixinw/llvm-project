@@ -153,7 +153,8 @@ bool fromJSON(const json::Value &Params, DisconnectArguments &DA,
   json::ObjectMapper O(Params, P);
   return O && O.mapOptional("restart", DA.restart) &&
          O.mapOptional("terminateDebuggee", DA.terminateDebuggee) &&
-         O.mapOptional("suspendDebuggee", DA.suspendDebuggee);
+         O.mapOptional("suspendDebuggee", DA.suspendDebuggee) &&
+         O.mapOptional("keepAliveTimeout", DA.keepAliveTimeout);
 }
 
 bool fromJSON(const json::Value &Params, PathFormat &PF, json::Path P) {
