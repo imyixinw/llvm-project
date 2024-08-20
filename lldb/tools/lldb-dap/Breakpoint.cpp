@@ -105,3 +105,7 @@ void Breakpoint::SetBreakpoint() {
   if (!m_hit_condition.empty())
     SetHitCondition();
 }
+
+void Breakpoint::SetThreadID(lldb::tid_t tid) {
+  m_bp.SetThreadID(tid);
+}
