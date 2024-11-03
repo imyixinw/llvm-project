@@ -2598,7 +2598,10 @@ void CommandInterpreter::SourceInitFileHome(CommandReturnObject &result,
   //
   // We don't have the fblldbinit module on windows, so we don't include it for
   // that build.
-  HandleCommand("script import fblldbinit", eLazyBoolNo, result);
+  HandleCommand("script import sys, importlib; "
+                "importlib.reload(sys.modules['fblldb']) if 'fblldb' "
+                "in sys.modules else __import__('fblldbinit')",
+                eLazyBoolNo, result);
 #endif
 
   llvm::SmallString<128> init_file;
