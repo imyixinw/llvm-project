@@ -1224,6 +1224,13 @@ protocol::Capabilities DAP::GetCapabilities() {
   completion_characters.emplace_back("\t");
   capabilities.completionTriggerCharacters = std::move(completion_characters);
 
+  // Only allow breakpoint mode if we set single_stoppped_event until
+  // we support user specified thread id, as it will affect the value
+  // of the dap.focus_tid
+  if (configuration.singleStoppedEvent) {
+  capabilities.breakpointModes = CreateBreakpointModes();
+  }
+
   // Put in non-DAP specification lldb specific information.
   capabilities.lldbExtVersion = debugger.GetVersionString();
 
@@ -1497,6 +1504,11 @@ std::vector<protocol::Breakpoint> DAP::SetSourceBreakpoints(
 
       const auto [iv, inserted] =
           existing_breakpoints.try_emplace(bp_pos, src_bp);
+      // Set thread id filter to focus_tid if the mode is "threadFocused"
+      const auto breakpoint_mode = bp.mode.value_or("");
+      if (breakpoint_mode == "threadFocused" &&
+          this->focus_tid != LLDB_INVALID_THREAD_ID)
+        iv->second.SetThreadID(this->focus_tid);
       // We check if this breakpoint already exists to update it.
       if (inserted) {
         if (llvm::Error error = iv->second.SetBreakpoint(source)) {
