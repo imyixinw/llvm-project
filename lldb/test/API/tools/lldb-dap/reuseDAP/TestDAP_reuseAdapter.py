@@ -37,3 +37,34 @@ class TestDAP_reuseAdpater(lldbdap_testcase.DAPTestCaseBase):
         breakpoint_ids = self.set_source_breakpoints(source, [breakpoint2_line])
         self.continue_to_breakpoints(breakpoint_ids)
         self.dap_server.request_disconnect()
+
+    @skipIfWindows
+    def test_exception_breakopints(self):
+        """
+        Test reuse lldb-dap works across debug sessions.
+        """
+        program = self.getBuildArtifact("a.out")
+
+        # Keep lldb-dap alive for 10 minutes.
+        dapKeepAliveTimeInMS = 10 * 1000 * 60
+        self.build_and_launch(program, disconnectAutomatically=False, keepAliveTimeout=dapKeepAliveTimeInMS)
+
+        response = self.dap_server.request_setExceptionBreakpoints(
+            filters=["cpp_throw", "cpp_catch"]
+        )
+        self.assertTrue(response)
+        self.assertTrue(response["success"])
+        self.continue_to_exception_breakpoint("C++ Throw")
+        self.dap_server.request_disconnect()
+
+        # Second debug session by reusing lldb-dap.
+        self.create_debug_adapter(reuseDapServer=True)
+        self.launch(program)
+
+        response = self.dap_server.request_setExceptionBreakpoints(
+            filters=["cpp_throw", "cpp_catch"],
+        )
+        self.assertTrue(response)
+        self.assertTrue(response["success"])
+        self.continue_to_exception_breakpoint("C++ Throw")
+        self.dap_server.request_disconnect()
