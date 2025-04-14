@@ -227,22 +227,19 @@ class TestDAP_attach(lldbdap_testcase.DAPTestCaseBase):
             pattern=terminateCommands[0],
         )
         self.verify_commands("terminateCommands", output, terminateCommands)
-    
+
     def test_session_id_update(self):
         self.build_and_create_debug_adapter()
         program = self.getBuildArtifact("a.out")
-        
-        def spawn(program):
-            process = subprocess.Popen(
-                [program], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-        self.spawn_thread = threading.Thread(
-            target=spawn,
-            args=(program,),
+        self.process = subprocess.Popen(
+            [program],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        self.spawn_thread.start()
+
         postRunCommands = ["script print('Actual_Session_ID: ' + str(os.getenv('VSCODE_DEBUG_SESSION_ID')))"]
-        self.attach(program=program, vscode_session_id="test_session_id", postRunCommands=postRunCommands)
+        self.attach(pid=self.process.pid, vscode_session_id="test_session_id", postRunCommands=postRunCommands)
         output = self.get_console() 
         lines = filter(lambda x: 'Actual_Session_ID' in x, output.splitlines())  
         self.assertTrue(
