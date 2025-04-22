@@ -62,7 +62,7 @@ enum GDBRemoteServerError {
   eErrorFirst = 29,
   eErrorNoProcess = eErrorFirst,
   eErrorResume,
-  eErrorExitStatus
+  eErrorExitStatus,
 };
 }
 
@@ -1396,6 +1396,10 @@ GDBRemoteCommunicationServerLLGS::Handle_qProcessInfo(
   if (!Host::GetProcessInfo(pid, proc_info))
     return SendErrorResponse(1);
 
+  // We check for the bool so we don't emit the false and waste bytes.
+  if (m_current_process->InNonResumableStop())
+    proc_info.SetNonResumable(true);
+
   StreamString response;
   CreateProcessInfoResponse_DebugServerStyle(proc_info, response);
   return SendPacketNoLock(response.GetString());
@@ -1821,6 +1825,12 @@ GDBRemoteCommunicationServerLLGS::Handle_vCont(
     auto process_it = m_debugged_processes.find(x.first);
     if (process_it == m_debugged_processes.end()) {
       LLDB_LOG(log, "vCont failed for process {0}: process not debugged",
+               x.first);
+      return SendErrorResponse(GDBRemoteServerError::eErrorResume);
+    }
+
+    if (process_it->second.process_up->InNonResumableStop()) {
+      LLDB_LOG(log, "vCont failed for process {0}: process not resumable",
                x.first);
       return SendErrorResponse(GDBRemoteServerError::eErrorResume);
     }

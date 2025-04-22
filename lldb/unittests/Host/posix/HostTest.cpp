@@ -116,7 +116,6 @@ TEST_F(HostTest, GetProcessInfoSetsPriority) {
   ASSERT_TRUE(Info.IsZombie().has_value());
   ASSERT_FALSE(Info.IsZombie().value());
 
-  ASSERT_TRUE(Info.IsCoreDumping().has_value());
-  ASSERT_FALSE(Info.IsCoreDumping().value());
+  ASSERT_FALSE(Info.IsCoreDumping());
 }
 #endif

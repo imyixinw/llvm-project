@@ -1304,6 +1304,9 @@ void GDBRemoteCommunicationServerCommon::
     if (!abi.empty())
       response.Printf("elf_abi:%s;", abi.c_str());
     response.Printf("ptrsize:%d;", proc_arch.GetAddressByteSize());
+    std::optional<bool> non_resumable = proc_info.IsNonResumable();
+    if (non_resumable)
+      response.Printf("non_resumable:%d;", *non_resumable);
   }
 }
 

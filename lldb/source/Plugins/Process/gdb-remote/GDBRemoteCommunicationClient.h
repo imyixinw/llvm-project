@@ -530,6 +530,8 @@ public:
 
   llvm::Expected<int> KillProcess(lldb::pid_t pid);
 
+  bool SafeToResume() const { return !m_in_nonresumable_stop; }
+
 protected:
   LazyBool m_supports_not_sending_acks = eLazyBoolCalculate;
   LazyBool m_supports_thread_suffix = eLazyBoolCalculate;
@@ -622,6 +624,8 @@ protected:
   int m_target_vm_page_size = 0; // target system VM page size; 0 unspecified
   uint64_t m_max_packet_size = 0;    // as returned by qSupported
   std::string m_qSupported_response; // the complete response to qSupported
+  bool m_in_nonresumable_stop =
+      false; // true if we are in a stop that cannot be resumed, only exited.
 
   bool m_supported_async_json_packets_is_valid = false;
   lldb_private::StructuredData::ObjectSP m_supported_async_json_packets_sp;

@@ -2235,6 +2235,9 @@ bool GDBRemoteCommunicationClient::GetCurrentProcessInfo(bool allow_lazy) {
             if (llvm::to_integer(x, vmaddr, 16))
               m_binary_addresses.push_back(vmaddr);
           }
+        } else if (name == "non_resumable") {
+          if (!value.getAsInteger(0, m_in_nonresumable_stop))
+            ++num_keys_decoded;
         }
       }
       if (num_keys_decoded > 0)

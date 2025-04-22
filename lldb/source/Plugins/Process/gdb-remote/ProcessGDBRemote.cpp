@@ -966,6 +966,11 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
       // architecture we got from the remote GDB server
       GetTarget().SetArchitecture(process_arch);
     }
+
+    // If the process is in a non resumable stop, we'll keep erroring out
+    // trying to jit and continue the process. So we set can JIT to false
+    // so any expression is evaluated in LLDB.
+    SetCanJIT(m_gdb_comm.SafeToResume());
   }
 
   // Target and Process are reasonably initailized;
@@ -1181,6 +1186,9 @@ void ProcessGDBRemote::DidAttach(ArchSpec &process_arch) {
 }
 
 Status ProcessGDBRemote::WillResume() {
+  if (!m_gdb_comm.SafeToResume())
+    return Status::FromErrorString("Process is in a non-resumable stop. Only "
+                                   "detach or exit are supported");
   m_continue_c_tids.clear();
   m_continue_C_tids.clear();
   m_continue_s_tids.clear();

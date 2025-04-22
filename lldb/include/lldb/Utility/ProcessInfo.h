@@ -250,7 +250,13 @@ public:
   // proc/../status specifies CoreDumping as the field
   // so we match the case here.
   void SetIsCoreDumping(bool is_coredumping) { m_coredumping = is_coredumping; }
-  std::optional<bool> IsCoreDumping() const { return m_coredumping; }
+  bool IsCoreDumping() const { return m_coredumping && *m_coredumping; };
+
+  void SetNonResumable(bool is_nonresumable) {
+    m_non_resumable = is_nonresumable;
+  }
+
+  std::optional<bool> IsNonResumable() const { return m_non_resumable; }
 
   void Dump(Stream &s, UserIDResolver &resolver) const;
 
@@ -272,6 +278,7 @@ protected:
   std::optional<int8_t> m_priority_value = std::nullopt;
   std::optional<bool> m_zombie = std::nullopt;
   std::optional<bool> m_coredumping = std::nullopt;
+  std::optional<bool> m_non_resumable = std::nullopt;
 };
 
 typedef std::vector<ProcessInstanceInfo> ProcessInstanceInfoList;

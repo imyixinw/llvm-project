@@ -187,7 +187,11 @@ public:
 
   bool IsStepping() const { return m_state == lldb::eStateStepping; }
 
-  bool CanResume() const { return m_state == lldb::eStateStopped; }
+  bool CanResume() const {
+    return m_state == lldb::eStateStopped && !InNonResumableStop();
+  }
+
+  bool IsStopped() const { return m_state == lldb::eStateStopped; }
 
   lldb::ByteOrder GetByteOrder() const {
     return GetArchitecture().GetByteOrder();
@@ -408,6 +412,16 @@ public:
     return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                    "Not implemented");
   }
+
+  /// Check if the process is in a stop that cannot be safely resumed,
+  /// instead only allowing exit of the program.
+  ///
+  /// Some examples are in Linux being PTRACE_O_TRACEEXIT or calling
+  /// PTRACE_SEIZE on a coredumping process.
+  ///
+  /// \return
+  ///   A bool indicating whether this process can ever be resumed.
+  virtual bool InNonResumableStop() const { return false; }
 
 protected:
   struct SoftwareBreakpoint {

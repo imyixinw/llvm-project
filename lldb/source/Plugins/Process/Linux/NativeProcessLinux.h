@@ -165,6 +165,8 @@ public:
   /// Writes a siginfo_t structure corresponding to the given thread ID to the
   /// memory region pointed to by \p siginfo.
   Status GetSignalInfo(lldb::tid_t tid, void *siginfo) const;
+  void SetInNonResumableStop(bool value) { m_nonresumable_stop = value; }
+  bool InNonResumableStop() const override { return m_nonresumable_stop; }
 
 protected:
   llvm::Expected<llvm::ArrayRef<uint8_t>>
@@ -175,7 +177,7 @@ protected:
 private:
   Manager &m_manager;
   ArchSpec m_arch;
-
+  bool m_nonresumable_stop = false;
   LazyBool m_supports_mem_region = eLazyBoolCalculate;
   std::vector<std::pair<MemoryRegionInfo, FileSpec>> m_mem_region_cache;
 
@@ -191,8 +193,12 @@ private:
 
   // Returns a list of process threads that we have attached to.
   static llvm::Expected<std::vector<::pid_t>> Attach(::pid_t pid);
+  // Returns a list of process threads that we have seized and interrupted.
+  static llvm::Expected<std::vector<::pid_t>> Seize(::pid_t pid);
 
   static Status SetDefaultPtraceOpts(const lldb::pid_t);
+
+  static uint64_t GetDefaultPtraceOpts();
 
   bool TryHandleWaitStatus(lldb::pid_t pid, WaitStatus status);
 
