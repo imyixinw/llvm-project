@@ -5,11 +5,12 @@ Test lldb-dap setBreakpoints request
 import dap_server
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
-from lldbsuite.test import lldbutil
-import lldbdap_testcase
-import time
 import os
 import re
+import time
+
+import lldbdap_testcase
+from lldbsuite.test import lldbutil
 
 # Many tests are skipped on Windows because get_stdout() returns None there.
 # Despite the test program printing correctly. See
@@ -99,6 +100,23 @@ class TestDAP_launch(lldbdap_testcase.DAPTestCaseBase):
                 self.assertNotEqual(
                     reason, "breakpoint", 'verify stop isn\'t "main" breakpoint'
                 )
+
+    def test_empty_sourceMap(self):
+        """
+        Tests the launch with empty source map should not issue source map command.
+        """
+        program = self.getBuildArtifact("a.out")
+        self.build_and_create_debug_adapter()
+        empty_source_map = []
+        self.launch(program, sourceMap=empty_source_map)
+        self.continue_to_exit()
+
+        # Now get the console output and verify no source map command was issued for empty source map.
+        console_output = self.get_console()
+        self.assertTrue(
+            console_output and len(console_output) > 0, "expect some console output"
+        )
+        self.assertNotIn("Setting source map:", console_output)
 
     @skipIfWindows
     def test_cwd(self):
@@ -575,25 +593,28 @@ class TestDAP_launch(lldbdap_testcase.DAPTestCaseBase):
 
     def test_session_id_update(self):
         program = self.getBuildArtifact("a.out")
-        postRunCommands = ["script print('Actual_Session_ID: ' + str(os.getenv('VSCODE_DEBUG_SESSION_ID')))"]
+        postRunCommands = [
+            "script print('Actual_Session_ID: ' + str(os.getenv('VSCODE_DEBUG_SESSION_ID')))"
+        ]
         self.build_and_launch(
-            program, 
-            vscode_session_id="test_session_id", 
+            program,
+            vscode_session_id="test_session_id",
             postRunCommands=postRunCommands,
-        )  
-        output = self.get_console() 
-        self.continue_to_exit()
-        lines = filter(lambda x: 'Actual_Session_ID' in x, output.splitlines())  
-        self.assertTrue(
-            any("test_session_id" in l for l in lines), "expect session id in console output"
         )
-    
-    def test_session_id_update_empty(self): 
+        output = self.get_console()
+        self.continue_to_exit()
+        lines = filter(lambda x: "Actual_Session_ID" in x, output.splitlines())
+        self.assertTrue(
+            any("test_session_id" in l for l in lines),
+            "expect session id in console output",
+        )
+
+    def test_session_id_update_empty(self):
         program = self.getBuildArtifact("a.out")
-        self.build_and_launch(program)  
-        output = self.get_console() 
+        self.build_and_launch(program)
+        output = self.get_console()
         self.continue_to_exit()
         self.assertTrue(
-            all("VSCODE_DEBUG_SESSION_ID" not in l for l in output.splitlines()), 
-            "expect NO session id update command"
+            all("VSCODE_DEBUG_SESSION_ID" not in l for l in output.splitlines()),
+            "expect NO session id update command",
         )

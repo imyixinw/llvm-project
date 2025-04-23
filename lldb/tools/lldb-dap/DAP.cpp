@@ -1112,9 +1112,8 @@ void DAP::ConfigureSourceMaps() {
   if (configuration.sourceMap.empty() && configuration.sourcePath.empty())
     return;
 
-  std::string sourceMapCommand;
-  llvm::raw_string_ostream strm(sourceMapCommand);
-  strm << "settings set target.source-map ";
+  std::string sourceMapCommandMappings;
+  llvm::raw_string_ostream strm(sourceMapCommandMappings);
 
   if (!configuration.sourceMap.empty()) {
     for (const auto &kv : configuration.sourceMap) {
@@ -1124,7 +1123,11 @@ void DAP::ConfigureSourceMaps() {
     strm << "\".\" \"" << configuration.sourcePath << "\"";
   }
 
-  RunLLDBCommands("Setting source map:", {sourceMapCommand});
+  if (!sourceMapCommandMappings.empty()) {
+    std::string sourceMapCommand = "settings set target.source-map ";
+    sourceMapCommand += sourceMapCommandMappings;
+    RunLLDBCommands("Setting source map:", {sourceMapCommand});
+  }
 }
 
 void DAP::SetConfiguration(const protocol::Configuration &config,
