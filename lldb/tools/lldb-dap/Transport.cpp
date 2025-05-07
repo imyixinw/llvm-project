@@ -11,7 +11,9 @@
 #include "lldb/lldb-forward.h"
 #include "llvm/ADT/StringRef.h"
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <winsock2.h>
+#else
 #include <sys/select.h>
 #endif
 
