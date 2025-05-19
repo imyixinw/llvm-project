@@ -967,10 +967,16 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
       GetTarget().SetArchitecture(process_arch);
     }
 
-    // If the process is in a non resumable stop, we'll keep erroring out
-    // trying to jit and continue the process. So we set can JIT to false
-    // so any expression is evaluated in LLDB.
-    SetCanJIT(m_gdb_comm.SafeToResume());
+    // We don't want to cause side-effects unintentionally on the happy path
+    // so we don't touch CanJIT unless we know we've hit a non-resumable
+    // state. Additionally we don't check `CanJIT` because it itself
+    // would modify the state of CanJIT.
+    if (!m_gdb_comm.SafeToResume()) {
+      // If the process is in a non resumable stop, we'll keep erroring out
+      // trying to jit and continue the process. So we set can JIT to false
+      // so any expression is evaluated in LLDB.
+      SetCanJIT(false);
+    }
   }
 
   // Target and Process are reasonably initailized;
