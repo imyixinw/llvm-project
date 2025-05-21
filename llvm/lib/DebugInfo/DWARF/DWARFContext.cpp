@@ -622,9 +622,7 @@ public:
       return getNormalTypeUnitMap();
   }
 
-  Error doWorkThreadSafely(function_ref<Error()> Work) override {
-    return Work();
-  }
+
 };
 
 class ThreadSafeState : public ThreadUnsafeDWARFContextState {
@@ -739,11 +737,6 @@ public:
   getTypeUnitMap(bool IsDWO) override {
     std::unique_lock<std::recursive_mutex> LockGuard(Mutex);
     return ThreadUnsafeDWARFContextState::getTypeUnitMap(IsDWO);
-  }
-
-  Error doWorkThreadSafely(function_ref<Error()> Work) override {
-    std::unique_lock<std::recursive_mutex> LockGuard(Mutex);
-    return ThreadUnsafeDWARFContextState::doWorkThreadSafely(Work);
   }
 };
 } // namespace
