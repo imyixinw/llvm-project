@@ -335,23 +335,17 @@ ProcessElfCore::GetLoadedModuleList() {
                        std::tuple<lldb::addr_t, lldb::addr_t, uint8_t>>
         module_range_map;
     // Helper function to add a new module range.
-    // It takes care of duplication module ranges.
+    // It takes care of duplication module ranges and merges overlapping ranges.
     auto add_module_range =
         [&module_range_map](const std::string &module_path, lldb::addr_t start,
                             lldb::addr_t end, uint32_t entry_count) {
-          // To add a range, we check any duplication ranges and only
-          // store a "better" one. See below for the definition of "better".
+          // To add a range, we check for existing ranges and merge if they overlap
           auto module_iter = module_range_map.find(module_path);
           if (module_iter == module_range_map.end())
             // Unique range, simply add it.
             module_range_map[module_path] = {start, end, entry_count};
           else {
-            // Found a duplication let's check which is better.
-            //
-            // A range is considered better if:
-            //   1. if the range has more entries, or
-            //   2. the same number of range entries but larger in range size
-
+            // Found an existing range, check if we should merge them
             auto &existing_module_range = module_iter->second;
             auto &existing_range_start = std::get<0>(existing_module_range);
             auto &existing_range_end = std::get<1>(existing_module_range);
@@ -359,12 +353,25 @@ ProcessElfCore::GetLoadedModuleList() {
 
             assert(end > start);
             assert(existing_range_end > existing_range_start);
-            if (entry_count > existing_entry_count ||
-                (entry_count == existing_entry_count &&
-                 end - start > existing_range_end - existing_range_start)) {
-              existing_range_start = start;
-              existing_range_end = end;
-              existing_entry_count = entry_count;
+            // Check if ranges overlap or are adjacent
+            // Ranges [a,b] and [c,d] overlap if max(a,c) <= min(b,d)
+            if (std::max(existing_range_start, start) <= std::min(existing_range_end, end)) {
+              // Merge the ranges by taking the union
+              existing_range_start = std::min(existing_range_start, start);
+              existing_range_end = std::max(existing_range_end, end);
+              existing_entry_count += entry_count;
+            } else {
+              // Ranges don't overlap, keep the "better" one
+              // A range is considered better if:
+              //   1. if the range has more entries, or
+              //   2. the same number of range entries but larger in range size
+              if (entry_count > existing_entry_count ||
+                  (entry_count == existing_entry_count &&
+                   end - start > existing_range_end - existing_range_start)) {
+                existing_range_start = start;
+                existing_range_end = end;
+                existing_entry_count = entry_count;
+              }
             }
           }
         };
