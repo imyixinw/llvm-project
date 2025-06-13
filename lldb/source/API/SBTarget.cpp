@@ -2071,6 +2071,12 @@ SBTarget::GetInstructionsWithFlavor(lldb::addr_t base_addr,
 
 SBError SBTarget::SetSectionLoadAddress(lldb::SBSection section,
                                         lldb::addr_t section_base_addr) {
+  return SetSectionLoadAddress(section, section_base_addr, true);
+}
+
+SBError SBTarget::SetSectionLoadAddress(lldb::SBSection section,
+                                        lldb::addr_t section_base_addr,
+                                        bool should_flush) {
   LLDB_INSTRUMENT_VA(this, section, section_base_addr);
 
   SBError sb_error;
@@ -2093,7 +2099,7 @@ SBError SBTarget::SetSectionLoadAddress(lldb::SBSection section,
               target_sp->ModulesDidLoad(module_list);
             }
             // Flush info in the process (stack frames, etc)
-            if (process_sp)
+            if (process_sp && should_flush)
               process_sp->Flush();
           }
         }
