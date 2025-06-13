@@ -1466,6 +1466,10 @@ ModuleSpec
 PluginManager::LocateExecutableObjectFile(const ModuleSpec &module_spec,
                                           StatisticsMap &map) {
   auto instances = GetSymbolLocatorInstances().GetSnapshot();
+  // Move "default" plugin to the front if it exists
+  std::stable_partition(
+      instances.begin(), instances.end(),
+      [](const auto &instance) { return instance.name == "Default"; });
   for (auto &instance : instances) {
     if (instance.locate_executable_object_file) {
       StatsDuration time;
@@ -1486,6 +1490,10 @@ FileSpec PluginManager::LocateExecutableSymbolFile(
     const ModuleSpec &module_spec, const FileSpecList &default_search_paths,
     StatisticsMap &map) {
   auto instances = GetSymbolLocatorInstances().GetSnapshot();
+  // Move "default" plugin to the front if it exists
+  std::stable_partition(
+      instances.begin(), instances.end(),
+      [](const auto &instance) { return instance.name == "Default"; });
   for (auto &instance : instances) {
     if (instance.locate_executable_symbol_file) {
       StatsDuration time;

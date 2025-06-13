@@ -52,16 +52,6 @@ class DebugInfodTests(TestBase):
 
     @skipIfCurlSupportMissing
     @skipUnlessPlatform(["linux", "freebsd"])
-    def test_debuginfod_executable(self):
-        """
-        Test behavior with the full binary available from Debuginfod as
-        'executable' from the plug-in.
-        """
-        test_root = self.config_test(["a.out"], None, "a.out.unstripped")
-        self.try_breakpoint(True)
-
-    @skipIfCurlSupportMissing
-    @skipUnlessPlatform(["linux", "freebsd"])
     def test_debuginfod_okd_symbols(self):
         """
         Test behavior with the 'only-keep-debug' symbols available from Debuginfod.
