@@ -9,13 +9,16 @@
 // Main header include
 #include "DynamicLoaderDumpWithModuleList.h"
 
+#include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
+#include "llvm/Support/ThreadPool.h"
 
 #include "Plugins/ObjectFile/Placeholder/ObjectFilePlaceholder.h"
+#include <mutex>
 #include <regex>
 
 using namespace lldb;
@@ -52,6 +55,26 @@ DynamicLoaderDumpWithModuleList::DynamicLoaderDumpWithModuleList(
       m_vdso_base(LLDB_INVALID_ADDRESS) {}
 
 DynamicLoaderDumpWithModuleList::~DynamicLoaderDumpWithModuleList() {}
+
+void DynamicLoaderDumpWithModuleList::SetLoadedModule(const ModuleSP &module_sp,
+                                                      addr_t link_map_addr) {
+  llvm::sys::ScopedWriter lock(m_loaded_modules_rw_mutex);
+  m_loaded_modules[module_sp] = link_map_addr;
+}
+
+void DynamicLoaderDumpWithModuleList::UnloadModule(const ModuleSP &module_sp) {
+  llvm::sys::ScopedWriter lock(m_loaded_modules_rw_mutex);
+  m_loaded_modules.erase(module_sp);
+}
+
+std::optional<lldb::addr_t>
+DynamicLoaderDumpWithModuleList::GetLoadedModuleLinkAddr(const ModuleSP &module_sp) {
+  llvm::sys::ScopedReader lock(m_loaded_modules_rw_mutex);
+  auto it = m_loaded_modules.find(module_sp);
+  if (it != m_loaded_modules.end())
+    return it->second;
+  return std::nullopt;
+}
 
 std::optional<const LoadedModuleInfoList::LoadedModuleInfo>
 DynamicLoaderDumpWithModuleList::GetModuleInfo(lldb::addr_t module_base_addr) {
@@ -201,11 +224,23 @@ void DynamicLoaderDumpWithModuleList::DidAttach() {
   LoadVDSO();
 
   ModuleList module_list;
+  
+  // Collect module information first
+  std::vector<ModuleInfo> module_info_list;
   LoadAllModules([&](const std::string &name, addr_t base_addr,
                      addr_t module_size, addr_t link_map_addr) {
     // vdso module has already been loaded.
     if (base_addr == m_vdso_base)
       return;
+    module_info_list.emplace_back(ModuleInfo{name, base_addr, module_size, link_map_addr});
+  });
+
+  // Load modules in parallel or sequentially based on target setting
+  auto load_module_fn = [this, &module_list, &log](const ModuleInfo &module_info) {
+    const std::string &name = module_info.name;
+    addr_t base_addr = module_info.base_addr;
+    addr_t module_size = module_info.module_size;
+    addr_t link_map_addr = module_info.link_map_addr;
 
     FileSpec file(name, m_process->GetTarget().GetArchitecture().GetTriple());
     const bool base_addr_is_offset = false;
@@ -214,6 +249,10 @@ void DynamicLoaderDumpWithModuleList::DidAttach() {
     if (module_sp.get()) {
       LLDB_LOGF(log, "LoadAllCurrentModules loading module at 0x%lX: %s",
                 base_addr, name.c_str());
+      // Note: in a multi-threaded environment, these module lists may be
+      // appended to out-of-order. This is fine, since there's no
+      // expectation for `module_list` to be in any particular order, and
+      // appending to the module list is thread-safe.
       module_list.Append(module_sp);
     } else {
       LLDB_LOGF(
@@ -229,8 +268,18 @@ void DynamicLoaderDumpWithModuleList::DidAttach() {
                            base_addr_is_offset);
       m_process->GetTarget().GetImages().Append(module_sp, /*notify*/ true);
     }
-    m_loaded_modules[module_sp] = link_map_addr;
-  });
+    SetLoadedModule(module_sp, link_map_addr);
+  };
+
+  if (m_process->GetTarget().GetParallelModuleLoad()) {
+    llvm::ThreadPoolTaskGroup task_group(Debugger::GetThreadPool());
+    for (const auto &module_info : module_info_list)
+      task_group.async(load_module_fn, module_info);
+    task_group.wait();
+  } else {
+    for (const auto &module_info : module_info_list)
+      load_module_fn(module_info);
+  }
 
   m_process->GetTarget().ModulesDidLoad(module_list);
 }
@@ -273,15 +322,15 @@ lldb::addr_t DynamicLoaderDumpWithModuleList::GetThreadLocalData(
     const lldb::ModuleSP module_sp, const lldb::ThreadSP thread,
     lldb::addr_t tls_file_addr) {
   Log *log = GetLog(LLDBLog::DynamicLoader);
-  auto it = m_loaded_modules.find(module_sp);
-  if (it == m_loaded_modules.end()) {
+  std::optional<addr_t> link_map_addr_opt = GetLoadedModuleLinkAddr(module_sp);
+  if (!link_map_addr_opt.has_value()) {
     LLDB_LOGF(
         log, "GetThreadLocalData error: module(%s) not found in loaded modules",
         module_sp->GetObjectName().AsCString());
     return LLDB_INVALID_ADDRESS;
   }
 
-  addr_t link_map = it->second;
+  addr_t link_map = link_map_addr_opt.value();
   if (link_map == LLDB_INVALID_ADDRESS || link_map == 0) {
     LLDB_LOGF(log,
               "GetThreadLocalData error: invalid link map address=0x%" PRIx64,

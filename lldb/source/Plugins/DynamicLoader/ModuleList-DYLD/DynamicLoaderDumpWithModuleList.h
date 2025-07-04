@@ -14,6 +14,7 @@
 #include "Plugins/Process/Utility/AuxVector.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Target/DynamicLoader.h"
+#include "llvm/Support/RWMutex.h"
 
 /**
  * Dynamic loader for dump process with module list available.
@@ -70,6 +71,14 @@ private:
   const DynamicLoaderDumpWithModuleList &
   operator=(const DynamicLoaderDumpWithModuleList &) = delete;
 
+  // Structure to hold module information
+  struct ModuleInfo {
+    std::string name;
+    lldb::addr_t base_addr;
+    lldb::addr_t module_size;
+    lldb::addr_t link_map_addr;
+  };
+
   typedef std::function<void(const std::string &, lldb::addr_t, lldb::addr_t,
                              lldb::addr_t)>
       LoadModuleCallback;
@@ -109,8 +118,17 @@ private:
   // TODO: merge with DynamicLoaderPOSIXDYLD::m_loaded_modules
   // The same as DynamicLoaderPOSIXDYLD::m_loaded_modules to track all loaded
   // module's link map addresses. It is used by TLS to get DTV data structure.
+  /// This may be accessed in a multi-threaded context. Use the accessor methods
+  /// to access `m_loaded_modules` safely.
   std::map<lldb::ModuleWP, lldb::addr_t, std::owner_less<lldb::ModuleWP>>
       m_loaded_modules;
+  mutable llvm::sys::RWMutex m_loaded_modules_rw_mutex;
+
+  void SetLoadedModule(const lldb::ModuleSP &module_sp,
+                       lldb::addr_t link_map_addr);
+  void UnloadModule(const lldb::ModuleSP &module_sp);
+  std::optional<lldb::addr_t>
+  GetLoadedModuleLinkAddr(const lldb::ModuleSP &module_sp);
 };
 
 #endif // LLDB_SOURCE_PLUGINS_DYNAMICLOADER_MODULELIST_DYLD_DYNAMICLOADERDUMPWITHMODULELIST_H
