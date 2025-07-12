@@ -79,7 +79,12 @@ add_subdirectory(Thread)
 add_subdirectory(ValueObject)
 
 if(LLDB_ENABLE_PROTOCOL_SERVERS)
-  add_subdirectory(Protocol)
+# META: Disable this test for now.
+# We get a build error that lldb/Host/JSONTransport.h is missing.
+# That's due to D77191008. We might as well remove the ProtocolMCPServerTest.cpp test altogether,
+# because lldb/Host/JSONTransport.h is part of a major DAP/MCP rewrite that we don't have,
+# including it would be a major endeavor.
+# add_subdirectory(Protocol)
 endif()
 
 if(LLDB_CAN_USE_DEBUGSERVER AND LLDB_TOOL_DEBUGSERVER_BUILD AND NOT LLDB_USE_SYSTEM_DEBUGSERVER)
