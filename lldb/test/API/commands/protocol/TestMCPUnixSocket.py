@@ -28,7 +28,7 @@ class MCPUnixSocketCommandTestCase(TestBase):
             )
 
         self.expect(
-            f"protocol-server start MCP accept://{socket_file}",
+            f"protocol-server start MCP unix://{socket_file}",
             startstr="MCP server started with connection listeners:",
             substrs=[f"unix-connect://{socket_file}"],
         )
