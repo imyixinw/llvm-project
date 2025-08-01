@@ -1223,6 +1223,11 @@ void Module::ReplaceObjectFile(Target &target, FileSpec object_file,
   m_object_offset = object_offset;
   lldb::addr_t load_address =
       GetObjectFile()->GetBaseAddress().GetLoadAddress(&target);
+  if (m_symfile_up) {
+    // Keep all old symbol files around in case there are any lingering type
+    // references in any SBValue objects that might have been handed out.
+    m_old_symfiles.push_back(std::move(m_symfile_up));
+  }
 
   // Scope locking.
   {
