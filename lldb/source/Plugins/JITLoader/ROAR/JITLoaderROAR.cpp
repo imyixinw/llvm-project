@@ -474,12 +474,17 @@ void lldb_roar_private::JITLoaderROARSB::HandleNameBreakpointEvent(
     lldb_private::Target *target = &m_process->GetTarget();
     addr_t load_address = addr.GetLoadAddress(target);
     JITLoaderROARError err;
+    bool IsFunctionTrampoline = false;
     {
       PluginSync sync(*m_process);
-      if (GetGlobalPluginProperties().GetDisableTrampolineStop() &&
-          m_roar_di->IsFunctionTrampoline(load_address, err))
-        bp_loc->SetCallback(JITDebugTrampolineBreakpointHit, this, true);
-
+      IsFunctionTrampoline =
+          GetGlobalPluginProperties().GetDisableTrampolineStop() &&
+          m_roar_di->IsFunctionTrampoline(load_address, err);
+    }
+    if (IsFunctionTrampoline)
+      bp_loc->SetCallback(JITDebugTrampolineBreakpointHit, this, true);
+    {
+      PluginSync sync(*m_process);
       m_roar_di->HandleBreakpointByAddress(
           load_address, BreakpointOrLocationPtr{bp_loc.get()}.getOpaqueValue(),
           add_bp_locs, err);
