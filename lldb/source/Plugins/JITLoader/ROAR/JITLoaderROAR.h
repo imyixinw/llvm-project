@@ -117,6 +117,8 @@ private:
   bool m_reading_jit_entries;
 
   lldb_private::Process *m_process;
+  // Used to detect cycles in ResolveLoadAddress.
+  lldb::addr_t m_load_address = 0;
 };
 } // namespace lldb_roar_private
 

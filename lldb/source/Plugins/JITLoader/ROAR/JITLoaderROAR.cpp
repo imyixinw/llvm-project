@@ -25,6 +25,7 @@
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/raw_ostream.h"
@@ -266,9 +267,18 @@ bool lldb_roar_private::JITLoaderROARSB::ResolveLoadAddress(
     addr_t load_addr, lldb_private::Address &addr) {
   if (!m_roar_di)
     return false;
+  lldb_private::Log *log = GetLog(lldb_private::LLDBLog::JITLoader);
+  if (m_load_address) {
+    LLDB_LOGF(log,
+              "JITLoaderROAR::%s recrusive call is detected for: 0x%" PRIx64,
+              __FUNCTION__, load_addr);
+    return false;
+  }
+  auto RemoveAddress = llvm::make_scope_exit([&] { m_load_address = 0; });
+  m_load_address = load_addr;
+
   ReadJITEntries();
 
-  lldb_private::Log *log = GetLog(lldb_private::LLDBLog::JITLoader);
   JITLoaderROARError err;
   uint8_t jit_fn_loaded = 0;
   {
@@ -287,6 +297,12 @@ bool lldb_roar_private::JITLoaderROARSB::ResolveLoadAddress(
               __FUNCTION__, load_addr);
     return false;
   }
+  // This is needed when SBAddress is created and then
+  // GetTarget().ResolveSymbolContextForAddress is called.
+  // The latter uses section information to find out to which Module address
+  // belongs. Without this the first time API is invoked section is nullptr, and
+  // ResolveSymbolContextForAddress fails.
+  m_process->GetTarget().ResolveLoadAddress(load_addr, addr);
   return true;
 }
 
