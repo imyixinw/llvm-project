@@ -229,8 +229,8 @@ class TestDAP_attach(lldbdap_testcase.DAPTestCaseBase):
         self.verify_commands("terminateCommands", output, terminateCommands)
 
     def test_session_id_update(self):
-        self.build_and_create_debug_adapter()
-        program = self.getBuildArtifact("a.out")
+        program = self.build_and_create_debug_adapter_for_attach()
+
         self.process = subprocess.Popen(
             [program],
             stdin=subprocess.PIPE,
@@ -240,29 +240,27 @@ class TestDAP_attach(lldbdap_testcase.DAPTestCaseBase):
 
         postRunCommands = ["script print('Actual_Session_ID: ' + str(os.getenv('VSCODE_DEBUG_SESSION_ID')))"]
         self.attach(pid=self.process.pid, vscode_session_id="test_session_id", postRunCommands=postRunCommands)
-        output = self.get_console() 
-        lines = filter(lambda x: 'Actual_Session_ID' in x, output.splitlines())  
+        output = self.get_console()
+        lines = filter(lambda x: 'Actual_Session_ID' in x, output.splitlines())
         self.assertTrue(
             any('test_session_id' in l for l in lines), "expect session id in console output"
         )
-    
-    def test_session_id_update_empty(self): 
-        self.build_and_create_debug_adapter()
-        program = self.getBuildArtifact("a.out")
-        
-        def spawn(program):
-            process = subprocess.Popen(
-                [program], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-        self.spawn_thread = threading.Thread(
-            target=spawn,
-            args=(program,),
+
+    def test_session_id_update_empty(self):
+        program = self.build_and_create_debug_adapter_for_attach()
+
+        # Use a file as a synchronization point between test and inferior.
+        pid_file_path = lldbutil.append_to_process_working_directory(
+            self, "pid_file_%d" % (int(time.time()))
         )
-        self.spawn_thread.start()
+
+        popen = self.spawnSubprocess(program, [pid_file_path])
+        lldbutil.wait_for_file_on_target(self, pid_file_path)
+
         postRunCommands = ["script print('Actual_Session_ID: ' + str(os.getenv('VSCODE_DEBUG_SESSION_ID', 'None')))"]
         self.attach(program=program, postRunCommands=postRunCommands)
-        output = self.get_console() 
-        lines = filter(lambda x: 'Actual_Session_ID' in x, output.splitlines())
+        output = self.get_console()
+        lines = filter(lambda x: "Actual_Session_ID" in x, output.splitlines())
         self.assertTrue(
-            any(l == "Actual_Session_ID: None" in l for l in lines), "expect session id in console output"
+            any(l == "Actual_Session_ID: None" in l for l in lines),"expect session id in console output"
         )
