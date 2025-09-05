@@ -23,8 +23,7 @@ using namespace llvm;
 
 namespace {
 
-template <class ELFT>
-class ELFDumper {
+template <class ELFT> class ELFDumper {
   LLVM_ELF_IMPORT_TYPES_ELFT(ELFT)
 
   ArrayRef<Elf_Shdr> Sections;
@@ -108,7 +107,7 @@ public:
   Expected<ELFYAML::Object *> dump();
 };
 
-}
+} // namespace
 
 template <class ELFT>
 ELFDumper<ELFT>::ELFDumper(const object::ELFFile<ELFT> &O,
@@ -483,12 +482,31 @@ ELFDumper<ELFT>::dumpProgramHeaders(
     PH.Flags = Phdr.p_flags;
     PH.VAddr = Phdr.p_vaddr;
     PH.PAddr = Phdr.p_paddr;
-    PH.Offset = Phdr.p_offset;
 
     // yaml2obj sets the alignment of a segment to 1 by default.
     // We do not print the default alignment to reduce noise in the output.
     if (Phdr.p_align != 1)
       PH.Align = static_cast<llvm::yaml::Hex64>(Phdr.p_align);
+
+    // Set FileSize and MemSize for completeness
+    if (Phdr.p_filesz != 0)
+      PH.FileSize = static_cast<llvm::yaml::Hex64>(Phdr.p_filesz);
+    if (Phdr.p_memsz != 0)
+      PH.MemSize = static_cast<llvm::yaml::Hex64>(Phdr.p_memsz);
+
+    // Extract the actual content of the program header segment
+    if (Phdr.p_filesz > 0) {
+      Expected<ArrayRef<uint8_t>> ContentOrErr = Obj.getSegmentContents(Phdr);
+      if (ContentOrErr) {
+        ArrayRef<uint8_t> Content = *ContentOrErr;
+        if (!Content.empty()) {
+          PH.Content = yaml::BinaryRef(Content);
+        }
+      }
+    }
+
+    // Set Offset to ensure yaml2obj places content at correct file position
+    PH.Offset = Phdr.p_offset;
 
     // Here we match sections with segments.
     // It is not possible to have a non-Section chunk, because
@@ -1394,8 +1412,7 @@ ELFDumper<ELFT>::dumpGnuHashSection(const Elf_Shdr *Shdr) {
   // Set just the raw binary content if we were unable to read the header
   // or when the section data is truncated or malformed.
   uint64_t Size = Data.getData().size() - Cur.tell();
-  if (!Cur || (Size < MaskWords * AddrSize + NBuckets * 4) ||
-      (Size % 4 != 0)) {
+  if (!Cur || (Size < MaskWords * AddrSize + NBuckets * 4) || (Size % 4 != 0)) {
     consumeError(Cur.takeError());
     S->Content = yaml::BinaryRef(Content);
     return S.release();
@@ -1586,7 +1603,7 @@ ELFDumper<ELFT>::dumpGroupSection(const Elf_Shdr *Shdr) {
   if (Error E = dumpCommonSection(Shdr, *S))
     return std::move(E);
 
-  // Get symbol with index sh_info. This symbol's name is the signature of the group.
+  // Get symbol with index sh_info.
   Expected<StringRef> SymbolName = getSymbolName(Shdr->sh_link, Shdr->sh_info);
   if (!SymbolName)
     return SymbolName.takeError();

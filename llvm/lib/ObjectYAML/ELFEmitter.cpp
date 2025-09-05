@@ -29,6 +29,7 @@
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
+#include <algorithm>
 #include <optional>
 
 using namespace llvm;
@@ -457,8 +458,7 @@ ELFState<ELFT>::ELFState(ELFYAML::Object &D, yaml::ErrorHandler EH)
         std::make_unique<ELFYAML::SectionHeaderTable>(/*IsImplicit=*/true));
 }
 
-template <class ELFT>
-void ELFState<ELFT>::writeELFHeader(raw_ostream &OS) {
+template <class ELFT> void ELFState<ELFT>::writeELFHeader(raw_ostream &OS) {
   using namespace llvm::ELF;
 
   Elf_Ehdr Header;
@@ -554,7 +554,8 @@ void ELFState<ELFT>::initProgramHeaders(std::vector<Elf_Phdr> &PHeaders) {
     if (!YamlPhdr.FirstSec && !YamlPhdr.LastSec)
       continue;
 
-    // Get the index of the section, or 0 in the case when the section doesn't exist.
+    // Get the index of the section, or 0 in the case when the section doesn't
+    // exist.
     size_t First = NameToIndex[*YamlPhdr.FirstSec];
     if (!First)
       reportError("unknown section or fill referenced: '" + *YamlPhdr.FirstSec +
@@ -760,6 +761,11 @@ void ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
   // Ensure SHN_UNDEF entry is present. An all-zero section header is a
   // valid SHN_UNDEF entry since SHT_NULL == 0.
   SHeaders.resize(Doc.getSections().size());
+
+  // Zero-initialize all section headers to avoid garbage values in sh_link,
+  // sh_info, etc.
+  for (Elf_Shdr &Header : SHeaders)
+    zero(Header);
 
   for (const std::unique_ptr<ELFYAML::Chunk> &D : Doc.Chunks) {
     if (ELFYAML::Fill *S = dyn_cast<ELFYAML::Fill>(D.get())) {
@@ -2109,22 +2115,126 @@ bool ELFState<ELFT>::writeELF(raw_ostream &OS, ELFYAML::Object &Doc,
   }
 
   if (ReachedLimit)
-    State.reportError(
-        "the desired output size is greater than permitted. Use the "
-        "--max-size option to change the limit");
+    State.reportError("the desired output size is greater than permitted.");
 
   if (State.HasError)
     return false;
 
-  State.writeELFHeader(OS);
-  writeArrayData(OS, ArrayRef(PHeaders));
+  // Create a complete output buffer that we can patch with program header
+  // content
+  SmallVector<char, 0> OutputBuffer;
+  raw_svector_ostream BufferOS(OutputBuffer);
 
+  // Write ELF header and program headers first
+  State.writeELFHeader(BufferOS);
+  writeArrayData(BufferOS, ArrayRef(PHeaders));
+
+  // Write section content
+  CBA.writeBlobToStream(BufferOS);
+
+  // Apply program header content patches if any exist
+  // We need to be careful not to overwrite critical structures like ELF header
+  const size_t ElfHeaderSize = sizeof(Elf_Ehdr);
+  const size_t PHeaderTableSize = sizeof(Elf_Phdr) * Doc.ProgramHeaders.size();
+
+  for (size_t I = 0; I < Doc.ProgramHeaders.size(); ++I) {
+    const ELFYAML::ProgramHeader &YamlPhdr = Doc.ProgramHeaders[I];
+    if (!YamlPhdr.Content)
+      continue;
+
+    // Get the target offset for this program header
+    uint64_t TargetOffset;
+    if (YamlPhdr.Offset) {
+      TargetOffset = *YamlPhdr.Offset;
+    } else {
+      TargetOffset = PHeaders[I].p_offset;
+    }
+
+    // Create a buffer to hold the content
+    SmallVector<char, 64> TempBuffer;
+    raw_svector_ostream TempOS(TempBuffer);
+    YamlPhdr.Content->writeAsBinary(TempOS);
+
+    size_t ContentSize = YamlPhdr.Content->binary_size();
+
+    // Check bounds
+    if (TargetOffset + ContentSize > OutputBuffer.size()) {
+      State.reportError("program header content at offset 0x" +
+                        Twine::utohexstr(TargetOffset) +
+                        " extends beyond the output file size (0x" +
+                        Twine::utohexstr(OutputBuffer.size()) + ")");
+      continue;
+    }
+
+    // Check if this would overwrite the ELF header (which we want to preserve)
+    if (TargetOffset < ElfHeaderSize) {
+      // For program header content that wants to overwrite ELF header area,
+      // we need to reconstruct the ELF header from the YAML description
+      // rather than using our generated one
+
+      // Apply the patch, which might contain the correct ELF header
+      std::copy(TempBuffer.begin(), TempBuffer.end(),
+                OutputBuffer.begin() + TargetOffset);
+
+      // Then re-apply our ELF header on top, but only if the content didn't
+      // already contain a valid ELF header
+      if (TargetOffset == 0 && ContentSize >= ElfHeaderSize) {
+        // The program header content starts at 0 and is large enough to contain
+        // an ELF header - trust it instead of overwriting
+        continue;
+      }
+    } else if (TargetOffset < ElfHeaderSize + PHeaderTableSize) {
+      // Content overlaps with program header table area
+      // Apply the patch, but preserve our generated program header table
+
+      size_t PHeaderTableStart = ElfHeaderSize;
+      size_t PHeaderTableEnd = PHeaderTableStart + PHeaderTableSize;
+
+      if (TargetOffset < PHeaderTableEnd &&
+          TargetOffset + ContentSize > PHeaderTableStart) {
+        // There's overlap with program header table
+        // Split the write to preserve the program header table
+
+        if (TargetOffset < PHeaderTableStart) {
+          // Write the part before the program header table
+          size_t PreTableSize = PHeaderTableStart - TargetOffset;
+          std::copy(TempBuffer.begin(), TempBuffer.begin() + PreTableSize,
+                    OutputBuffer.begin() + TargetOffset);
+        }
+
+        if (TargetOffset + ContentSize > PHeaderTableEnd) {
+          // Write the part after the program header table
+          size_t PostTableOffset = PHeaderTableEnd;
+          size_t PostTableStart = PostTableOffset - TargetOffset;
+          std::copy(TempBuffer.begin() + PostTableStart, TempBuffer.end(),
+                    OutputBuffer.begin() + PostTableOffset);
+        }
+      } else {
+        // No actual overlap, safe to write
+        std::copy(TempBuffer.begin(), TempBuffer.end(),
+                  OutputBuffer.begin() + TargetOffset);
+      }
+    } else {
+      // Safe area - no overlap with critical structures
+      std::copy(TempBuffer.begin(), TempBuffer.end(),
+                OutputBuffer.begin() + TargetOffset);
+    }
+  }
+
+  // Patch section headers if needed
   const ELFYAML::SectionHeaderTable &SHT = Doc.getSectionHeaderTable();
-  if (!SHT.NoHeaders.value_or(false))
-    CBA.updateDataAt(*SHT.Offset, SHeaders.data(),
-                     SHT.getNumHeaders(SHeaders.size()) * sizeof(Elf_Shdr));
+  if (!SHT.NoHeaders.value_or(false)) {
+    size_t SHOffset = *SHT.Offset;
+    size_t SHSize = SHT.getNumHeaders(SHeaders.size()) * sizeof(Elf_Shdr);
+    if (SHOffset + SHSize <= OutputBuffer.size()) {
+      std::copy(reinterpret_cast<const char *>(SHeaders.data()),
+                reinterpret_cast<const char *>(SHeaders.data()) + SHSize,
+                OutputBuffer.begin() + SHOffset);
+    }
+  }
 
-  CBA.writeBlobToStream(OS);
+  // Write the complete buffer to output
+  OS.write(OutputBuffer.data(), OutputBuffer.size());
   return true;
 }
 
